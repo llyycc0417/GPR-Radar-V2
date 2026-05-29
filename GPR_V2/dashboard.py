@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import os
+import yfinance as yf
+from datetime import datetime
 import predictor          # 페이지2: 변동성 예측 엔진
 import bubble_predictor   # 페이지1: 버블 예측 엔진
 import news_updater
@@ -37,7 +39,7 @@ if st.session_state.page == 1:
             except Exception as e:
                 st.error(f"뉴스 수집 중 오류 발생: {e}")
 
-    # 좌우 2단 분할 (왼쪽: 가로 2칸 뉴스 / 오른쪽: 버블 진단)
+    # 좌우 2단 분할
     col1, col2 = st.columns([1, 1])
 
     with col1:
@@ -119,12 +121,17 @@ if st.session_state.page == 1:
 # 📄 페이지 2: S&P 500 변동성 예측 대시보드
 # ============================================================
 elif st.session_state.page == 2:
-    col_title, col_btn = st.columns([8, 2])
+    # 캡틴 오더: 양방향 이동 버튼 배치
+    col_title, col_btn1, col_btn2 = st.columns([6, 2, 2])
     with col_title:
         st.subheader("S&P 500 Volatility Prediction (HAR-RV Model)")
-    with col_btn:
-        if st.button("⬅️ 이전 페이지로 돌아가기", use_container_width=True):
+    with col_btn1:
+        if st.button("⬅️ 이전 (뉴스/버블)", use_container_width=True):
             st.session_state.page = 1
+            st.rerun()
+    with col_btn2:
+        if st.button("다음 ➡️ (시장 현황)", use_container_width=True):
+            st.session_state.page = 3
             st.rerun()
 
     if st.button("예측 엔진 가동 (최신 데이터 분석)", type="primary"):
@@ -153,3 +160,107 @@ elif st.session_state.page == 2:
         history_df = pd.DataFrame(res["history"])
         history_df.set_index("date", inplace=True)
         st.line_chart(history_df[["actual", "predicted"]], color=["#FF4B4B", "#0068C9"])
+
+# ============================================================
+# 📄 페이지 3: 글로벌 시장 현황 (신규 추가)
+# ============================================================
+elif st.session_state.page == 3:
+    col_title, col_btn = st.columns([8, 2])
+    with col_title:
+        st.subheader("📊 실시간 글로벌 시장 현황 (Market Monitor)")
+    with col_btn:
+        if st.button("⬅️ 이전 페이지로 돌아가기", use_container_width=True):
+            st.session_state.page = 2
+            st.rerun()
+
+    st.info("야후 파이낸스(yfinance) 실시간 연동 (VIX 공포지수는 역방향 색상 자동 적용)")
+
+    # 데이터 수집 함수 (서버 부담을 줄이기 위해 캐싱 적용)
+    @st.cache_data(ttl=600)  # 10분마다 갱신
+    def get_market_data_for_ui():
+        TICKERS = {
+            '코스피': '^KS11', '코스닥': '^KQ11', '나스닥': '^IXIC', 
+            'S&P500': '^GSPC', 'WTI (원유)': 'CL=F', 'Gold (금)': 'GC=F', 
+            'Bitcoin': 'BTC-USD', 'VIX (공포지수)': '^VIX'
+        }
+        UNITS = {
+            '코스피': '', '코스닥': '', '나스닥': '', 'S&P500': '', 
+            'WTI (원유)': '$', 'Gold (금)': '$', 'Bitcoin': '$', 'VIX (공포지수)': ''
+        }
+        results = {}
+        for name, ticker in TICKERS.items():
+            try:
+                data = yf.download(ticker, period='5d', auto_adjust=True, progress=False)
+                if isinstance(data.columns, pd.MultiIndex):
+                    data.columns = data.columns.get_level_values(0)
+
+                if len(data) >= 2:
+                    today_price = data['Close'].iloc[-1]
+                    prev_price  = data['Close'].iloc[-2]
+                    change_pct  = (today_price - prev_price) / prev_price * 100
+                    results[name] = {
+                        'price': today_price, 
+                        'change_pct': change_pct, 
+                        'unit': UNITS[name]
+                    }
+                else:
+                    results[name] = None
+            except Exception:
+                results[name] = None
+        return results
+
+    with st.spinner("글로벌 마켓 지표를 불러오는 중입니다..."):
+        market_data = get_market_data_for_ui()
+
+    # 화면에 그리기 위한 도우미 함수
+    def render_metric_card(col, name, data):
+        if data is None:
+            col.metric(name, "데이터 없음")
+        else:
+            p = data['price']
+            c = data['change_pct']
+            u = data['unit']
+            
+            # 캡틴이 설정한 가격 포맷 적용
+            if 'Bitcoin' in name:
+                price_str = f"{u}{p:,.0f}"
+            elif 'WTI' in name or 'Gold' in name:
+                price_str = f"{u}{p:,.2f}"
+            elif 'VIX' in name:
+                price_str = f"{p:.2f}"
+            else:
+                price_str = f"{p:,.2f}"
+
+            delta_str = f"{c:.2f}%"
+            
+            # VIX는 오를수록 위험하므로 빨간색(inverse) 처리
+            d_color = "inverse" if 'VIX' in name else "normal"
+            
+            # VIX 코멘트 추가 기능
+            if 'VIX' in name:
+                if p >= 30: comment = '(극단적 공포 🔴)'
+                elif p >= 20: comment = '(공포 🟠)'
+                elif p >= 15: comment = '(보통 🟡)'
+                elif p >= 12: comment = '(낙관적 🟢)'
+                else: comment = '(극단적 낙관 ⚪)'
+                name = f"{name} {comment}"
+
+            col.metric(name, price_str, delta_str, delta_color=d_color)
+
+    # 1열: 주가지수 4총사
+    st.markdown("### 📈 글로벌 주가지수")
+    m1, m2, m3, m4 = st.columns(4)
+    render_metric_card(m1, '코스피', market_data.get('코스피'))
+    render_metric_card(m2, '코스닥', market_data.get('코스닥'))
+    render_metric_card(m3, '나스닥', market_data.get('나스닥'))
+    render_metric_card(m4, 'S&P500', market_data.get('S&P500'))
+
+    st.markdown("---")
+
+    # 2열: 대체투자 및 위험지표 4총사
+    st.markdown("### 🛢️ 상품/암호화폐 및 위험 지표")
+    m5, m6, m7, m8 = st.columns(4)
+    render_metric_card(m5, 'WTI (원유)', market_data.get('WTI (원유)'))
+    render_metric_card(m6, 'Gold (금)', market_data.get('Gold (금)'))
+    render_metric_card(m7, 'Bitcoin', market_data.get('Bitcoin'))
+    render_metric_card(m8, 'VIX (공포지수)', market_data.get('VIX (공포지수)'))
