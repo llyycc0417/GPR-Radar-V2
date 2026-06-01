@@ -173,7 +173,7 @@ elif st.session_state.page == 3:
             st.session_state.page = 2
             st.rerun()
 
-    st.info("야후 파이낸스(yfinance) 실시간 연동 (VIX 공포지수는 역방향 색상 자동 적용)")
+    st.info("야후 파이낸스(yfinance) 실시간 연동 (모든 지표는 한국식 상승(빨강)/하락(초록) 적용)")
 
     # 데이터 수집 함수 (서버 부담을 줄이기 위해 캐싱 적용)
     @st.cache_data(ttl=600)  # 10분마다 갱신
@@ -233,8 +233,8 @@ elif st.session_state.page == 3:
 
             delta_str = f"{c:.2f}%"
             
-            # VIX는 오를수록 위험하므로 빨간색(inverse) 처리
-            d_color = "inverse" if 'VIX' in name else "normal"
+            # 🚀 캡틴 오더: 모든 지표를 한국 주식 시장 UI(상승은 무조건 빨강)로 통일
+            d_color = "inverse"
             
             # VIX 코멘트 추가 기능
             if 'VIX' in name:
