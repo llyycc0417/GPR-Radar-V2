@@ -1,5 +1,5 @@
 """
-주식시장 버블 위험도 분석 엔진 (bubble_predictor.py) - FRED Direct Download 버전
+주식시장 버블 위험도 분석 엔진 (bubble_predictor.py) - FRED 방탄 Download 버전
 """
 
 import os
@@ -54,15 +54,19 @@ def get_macro_data():
     except Exception as e:
         print(f"YFinance 다운로드 실패: {e}")
 
-    # B. FRED 데이터 (User-Agent 위장 접속 방식으로 봇 차단 우회)
+    # B. FRED 데이터 (FRED 컬럼명 변경 대응 완벽 방탄 처리)
     try:
         def _fetch_fred(series_id):
             url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-            # 일반 브라우저(크롬)인 것처럼 헤더를 위장하여 FRED 서버의 차단을 뚫어냅니다.
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
             response = requests.get(url, headers=headers, timeout=10)
             
-            tmp = pd.read_csv(io.StringIO(response.text), parse_dates=['DATE'], index_col='DATE')
+            # 🚀 FRED가 날짜 컬럼명을 'DATE'에서 'observation_date'로 마음대로 바꿔도
+            # 에러가 나지 않도록, 이름이 아닌 "무조건 첫 번째 열(0)"을 날짜로 읽어오는 방탄 로직 장착!
+            tmp = pd.read_csv(io.StringIO(response.text), parse_dates=[0], index_col=0)
+            
+            # 값 컬럼명도 FRED가 어떻게 주든 우리가 아는 series_id로 강제 덮어쓰기
+            tmp.columns = [series_id]
             tmp[series_id] = pd.to_numeric(tmp[series_id], errors='coerce')
             return tmp[[series_id]]
 
@@ -85,9 +89,7 @@ def get_macro_data():
     try:
         margin_df = pd.read_csv('finra_margin.csv', parse_dates=['Date']).set_index('Date')
         
-        # 파일 컬럼명이 다를 경우를 대비한 방탄 로직
         if 'debit_balance' not in margin_df.columns:
-            # 첫 번째 숫자형 컬럼을 마진부채로 강제 지정
             num_cols = margin_df.select_dtypes(include=[np.number]).columns
             if len(num_cols) > 0:
                 margin_df.rename(columns={num_cols[0]: 'debit_balance'}, inplace=True)
