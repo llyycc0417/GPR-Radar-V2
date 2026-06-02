@@ -4,6 +4,8 @@
 
 import os
 import warnings
+import requests
+import io
 from datetime import datetime
 
 import numpy as np
@@ -52,11 +54,15 @@ def get_macro_data():
     except Exception as e:
         print(f"YFinance 다운로드 실패: {e}")
 
-    # B. FRED 데이터 (Direct CSV Download 방식 적용)
+    # B. FRED 데이터 (User-Agent 위장 접속 방식으로 봇 차단 우회)
     try:
         def _fetch_fred(series_id):
             url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-            tmp = pd.read_csv(url, parse_dates=['DATE'], index_col='DATE')
+            # 일반 브라우저(크롬)인 것처럼 헤더를 위장하여 FRED 서버의 차단을 뚫어냅니다.
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            response = requests.get(url, headers=headers, timeout=10)
+            
+            tmp = pd.read_csv(io.StringIO(response.text), parse_dates=['DATE'], index_col='DATE')
             tmp[series_id] = pd.to_numeric(tmp[series_id], errors='coerce')
             return tmp[[series_id]]
 
