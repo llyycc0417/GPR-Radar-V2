@@ -1,5 +1,5 @@
 """
-주식시장 버블 위험도 분석 엔진 (bubble_predictor.py) - FRED 방탄 Download 버전
+주식시장 버블 위험도 분석 엔진 (bubble_predictor.py) - FRED 방탄 Download & Seed 고정 버전
 """
 
 import os
@@ -20,20 +20,22 @@ START = '2000-01-01'
 END = datetime.today().strftime('%Y-%m-%d')
 
 # ============================================================
-# 1. 안전장치: FINRA 마진부채 파일 자동 생성
+# 1. 안전장치: FINRA 마진부채 파일 자동 생성 (Seed 고정)
 # ============================================================
 def _ensure_finra_margin_csv():
     file_name = 'finra_margin.csv'
     if not os.path.exists(file_name):
         print(f"[알림] {file_name} 파일이 없어 임시 데이터를 생성합니다.")
+        np.random.seed(42)  # 🚀 생성되는 가짜 마진부채 값 고정
         dates = pd.date_range(start=START, end=END, freq='ME')
         base_debt = np.linspace(250000, 850000, len(dates))
         noise = np.random.normal(0, 15000, len(dates))
         df = pd.DataFrame({'Date': dates, 'debit_balance': base_debt + noise})
         df.to_csv(file_name, index=False)
+        np.random.seed(None)
 
 # ============================================================
-# 2. 방탄 거시경제 데이터 수집 (pandas_datareader 제거, Direct 연동)
+# 2. 방탄 거시경제 데이터 수집
 # ============================================================
 def get_macro_data():
     _ensure_finra_margin_csv()
@@ -54,18 +56,17 @@ def get_macro_data():
     except Exception as e:
         print(f"YFinance 다운로드 실패: {e}")
 
-    # B. FRED 데이터 (FRED 컬럼명 변경 대응 완벽 방탄 처리)
+    # B. FRED 데이터
     try:
         def _fetch_fred(series_id):
             url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
             response = requests.get(url, headers=headers, timeout=10)
             
-            # 🚀 FRED가 날짜 컬럼명을 'DATE'에서 'observation_date'로 마음대로 바꿔도
-            # 에러가 나지 않도록, 이름이 아닌 "무조건 첫 번째 열(0)"을 날짜로 읽어오는 방탄 로직 장착!
-            tmp = pd.read_csv(io.StringIO(response.text), parse_dates=[0], index_col=0)
+            # FRED 방어 로직: 403 에러 등 정상 응답이 아니면 에러 발생시켜 아래 except로 넘김
+            response.raise_for_status() 
             
-            # 값 컬럼명도 FRED가 어떻게 주든 우리가 아는 series_id로 강제 덮어쓰기
+            tmp = pd.read_csv(io.StringIO(response.text), parse_dates=[0], index_col=0)
             tmp.columns = [series_id]
             tmp[series_id] = pd.to_numeric(tmp[series_id], errors='coerce')
             return tmp[[series_id]]
@@ -81,9 +82,12 @@ def get_macro_data():
         df['Buffett_Index'] = (df['SP500'] / df['GDP']) * 100
         
     except Exception as e:
-        print(f"FRED 다운로드 실패 (대체 데이터 적용): {e}")
+        print(f"FRED IP 차단으로 인한 다운로드 실패 (대체 데이터 적용): {e}")
+        # 🚀 핵심 패치: np.random.seed(42)를 걸어 새로고침해도 똑같은 난수가 나오도록 자물쇠를 채웁니다.
+        np.random.seed(42)
         df['HY_Spread'] = 4.0 + np.random.normal(0, 0.5, len(df))
         df['Buffett_Index'] = (df['SP500'] / 25000) * 100
+        np.random.seed(None) # 다른 작업에 영향을 주지 않도록 자물쇠 해제
 
     # C. FINRA 마진 부채 로드
     try:
@@ -99,7 +103,9 @@ def get_macro_data():
         df.rename(columns={'debit_balance': 'Margin_Debt'}, inplace=True)
     except Exception as e:
         print(f"마진 부채 로드 실패 (대체 데이터 적용): {e}")
+        np.random.seed(42) # 🚀 마진부채 실패 시에도 고정
         df['Margin_Debt'] = 500000 + np.random.normal(0, 10000, len(df))
+        np.random.seed(None)
 
     df = df.ffill().bfill().dropna()
     df['CAPE_Proxy'] = df['SP500'] / df['SP500'].rolling(window=252*10, min_periods=1).mean() * 15
